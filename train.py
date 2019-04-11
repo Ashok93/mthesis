@@ -37,9 +37,9 @@ l1_loss = torch.nn.L1Loss()
 
 # Loss weights
 lambda_adv = 1
-lambda_task = 0.2
-lambda_content_sim = 0.008
-lambda_adv_consistency = 0.03
+lambda_task = 0.6
+lambda_content_sim = 0.00008
+lambda_adv_consistency = 0.0003
 
 # Networks initialization
 generator = Generator(opt)
@@ -201,9 +201,10 @@ for epoch in range(opt.n_epochs):
         adversarial_part_loss = -torch.mean(disc)
 
         fake_image_features = feature_extractor(fake_images)
-        real_image_features = feature_extractor(synthetic_images)
-        feature_consistency_loss = adversarial_loss(feature_discriminator(fake_image_features), valid_features)
+        real_image_features = feature_extractor(real_images)
 
+        feature_consistency_loss = adversarial_loss(feature_discriminator(fake_image_features), valid_features)
+        lambda_adv_consistency = 0
         generator_loss = lambda_task*task_specific_loss + \
                          lambda_adv*adversarial_part_loss + \
                          lambda_content_sim*content_sim_loss + \
@@ -284,4 +285,4 @@ for epoch in range(opt.n_epochs):
             sample = make_grid(sample, normalize=True)
             writer.add_image("Images", sample, batches_done)
             torch.save(generator.state_dict(), 'models_ckpt/adv_feature.pt')
-            save_image(fake_images[0], 'images/%d.png' % batches_done, normalize=True)
+            save_image(sample, 'images/%d.png' % batches_done, normalize=True)
