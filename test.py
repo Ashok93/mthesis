@@ -65,7 +65,7 @@ if cuda:
     task_loss.cuda()
 
 # Initialize weights
-generator.load_state_dict(torch.load('models_ckpt/rand_real.pt'))
+generator.load_state_dict(torch.load('models_ckpt/train_10_april.pt'))
 generator.eval()
 classifier.apply(weights_init_normal)
 
@@ -75,18 +75,18 @@ data_transform = transforms.Compose([
         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
     ])
 
-syn_image_folder = datasets.ImageFolder(root='dataset_main/synthetic/rgb',
+syn_image_folder = datasets.ImageFolder(root='dataset/synthetic/rgb',
                                         transform=data_transform)
-depth_image_folder = datasets.ImageFolder(root='dataset_main/synthetic/depth',
+depth_image_folder = datasets.ImageFolder(root='dataset/synthetic/depth',
                                          transform=transforms.Compose([
                                              transforms.Resize((opt.img_size, opt.img_size)),
                                              transforms.ToTensor()
                                          ]))
 syn_dataset = ConcatDataset(syn_image_folder, depth_image_folder)
-ori_dataset = datasets.ImageFolder(root='dataset_main/real',
+ori_dataset = datasets.ImageFolder(root='dataset/real',
                                    transform=data_transform)
 
-test_dataset = datasets.ImageFolder(root='dataset_main/test',
+test_dataset = datasets.ImageFolder(root='dataset/test',
                                    transform=data_transform)
 
 # DataLoader for the datasets
