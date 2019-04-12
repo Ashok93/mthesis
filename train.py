@@ -15,7 +15,7 @@ from nets.discriminator import Discriminator
 from nets.classifier import Classifier
 from nets.embedding_discriminator import FeatureDiscriminator
 
-from utils.util_funcs import one_hot_embedding, weights_init_normal
+from utils.util_funcs import one_hot_embedding, weights_init_normal, compute_gradient_penalty
 from utils.argparser import arg_parser
 from utils.datasets import ConcatDataset
 
@@ -37,9 +37,9 @@ l1_loss = torch.nn.L1Loss()
 
 # Loss weights
 lambda_adv = 1
-lambda_task = 0.6
+lambda_task = 0.2
 lambda_content_sim = 0.00008
-lambda_adv_consistency = 0.0003
+lambda_adv_consistency = 0.1
 
 # Networks initialization
 generator = Generator(opt)
@@ -204,7 +204,12 @@ for epoch in range(opt.n_epochs):
         real_image_features = feature_extractor(real_images)
 
         feature_consistency_loss = adversarial_loss(feature_discriminator(fake_image_features), valid_features)
-        lambda_adv_consistency = 0
+
+        if epoch <= 1000:
+            lambda_adv_consistency = 0
+        else:
+            lambda_adv_consistency = 0.1
+
         generator_loss = lambda_task*task_specific_loss + \
                          lambda_adv*adversarial_part_loss + \
                          lambda_content_sim*content_sim_loss + \
@@ -237,12 +242,11 @@ for epoch in range(opt.n_epochs):
 
             disc_real = discriminator(imgs_perm, perm_hot, synthetic_depth_imgs, disc_rand_noise)
             disc_fake = discriminator(fake_perm.detach(), fake_hot, synthetic_depth_imgs, disc_rand_noise)
-            discriminator_loss = -(torch.mean(disc_real) - torch.mean(disc_fake))
+            gradient_penalty = compute_gradient_penalty(discriminator, real_images.data, fake_images.data)
+            discriminator_loss = -(torch.mean(disc_real) - torch.mean(disc_fake)) + 10 * gradient_penalty
             discriminator_loss.backward()
             optimizer_D.step()
 
-            for p in discriminator.parameters():
-                p.data.clamp_(-0.011, 0.011)
         ##########################################################################################
 
         # Feature Discriminator ##################################################################
