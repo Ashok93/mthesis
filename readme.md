@@ -1,4 +1,7 @@
-# Master's thesis work @[Gestalt Robotics](https://www.gestalt-robotics.com/home.html)
+# Master's thesis work as a part of [ECN](https://www.ec-nantes.fr/)
+
+## Work done @[Gestalt Robotics](https://www.gestalt-robotics.com/home.html)
+
 ## *TITLE* : Training data generation for deep learning based robotic vision system
 
 ![alt text](https://github.com/Ashok93/mthesis/blob/master/assets/images/syn_to_real.png "SYN to REAL")
