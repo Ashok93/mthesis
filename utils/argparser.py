@@ -15,7 +15,7 @@ def arg_parser():
     parser.add_argument('--img_size', type=int, default=64, help='size of each image dimension')
     parser.add_argument('--channels', type=int, default=3, help='number of image channels')
     parser.add_argument('--n_classes', type=int, default=10, help='number of classes in the dataset')
-    parser.add_argument('--sample_interval', type=int, default=400, help='interval betwen image samples')
+    parser.add_argument('--sample_interval', type=int, default=800, help='interval betwen image samples')
 
     opt = parser.parse_args()
 

@@ -2,6 +2,7 @@ import torch
 import torch.functional as F
 import numpy as np
 
+
 def compute_image_grad(images):
     x_filter = torch.Tensor([[1, 0, -1], [2, 0, -2], [1, 0, -1]]).expand((1, 3, 3, 3)).cuda()
     y_filter = torch.Tensor([[1, 2, 1], [0, 0, 0], [-1, -2, -1]]).expand((1, 3, 3, 3)).cuda()
@@ -28,14 +29,14 @@ def one_hot_embedding(labels, num_classes):
     return y[labels]
 
 
-def compute_gradient_penalty(D, real_samples, fake_samples):
+def compute_gradient_penalty(D, one_hot, depth_images, disc_rand_noise, patch, real_samples, fake_samples):
     """Calculates the gradient penalty loss for WGAN GP"""
     # Random weight term for interpolation between real and fake samples
-    alpha = torch.Tensor(np.random.random((real_samples.size(0), 1, 1, 1)))
+    alpha = torch.Tensor(np.random.random((real_samples.size(0), 1, 1, 1))).cuda()
     # Get random interpolation between real and fake samples
     interpolates = (alpha * real_samples + ((1 - alpha) * fake_samples)).requires_grad_(True)
-    d_interpolates = D(interpolates)
-    fake = torch.Variable(torch.Tensor(real_samples.shape[0], 1).fill_(1.0), requires_grad=False)
+    d_interpolates = D(interpolates, one_hot, depth_images, disc_rand_noise)
+    fake = torch.autograd.Variable(torch.Tensor(real_samples.shape[0], *patch).fill_(1.0), requires_grad=False).cuda()
     # Get gradient w.r.t. interpolates
     gradients = torch.autograd.grad(
         outputs=d_interpolates,
@@ -46,5 +47,5 @@ def compute_gradient_penalty(D, real_samples, fake_samples):
         only_inputs=True,
     )[0]
     gradients = gradients.view(gradients.size(0), -1)
-    gradient_penalty = ((gradients.norm(2, dim=1) - 1) ** 2).mean()
+    gradient_penalty = ((gradients.norm(2, dim=1) - 1) ** 2).mean().cuda()
     return gradient_penalty

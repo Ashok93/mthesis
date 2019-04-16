@@ -18,7 +18,7 @@ from utils.util_funcs import one_hot_embedding, weights_init_normal
 from utils.argparser import arg_parser
 from utils.datasets import ConcatDataset
 
-writer = SummaryWriter(comment="_evaluation_run")
+writer = SummaryWriter(comment="_evaluation_run_pcbs")
 
 # Get thar args from the user
 opt = arg_parser()
@@ -35,7 +35,7 @@ task_loss = torch.nn.CrossEntropyLoss()
 # Loss weights
 lambda_adv = 1
 lambda_task = 0.3
-lambda_content_sim = 0.002
+lambda_content_sim = 0.0002
 
 # Initialize generator and discriminator
 generator = Generator(opt)
@@ -85,8 +85,8 @@ if cuda:
     task_loss.cuda()
 
 # Initialize weights
-generator.load_state_dict(torch.load('models_ckpt/train_10_april.pt'))
-generator.eval()
+generator.load_state_dict(torch.load('models_ckpt/pcb_only.pt'))
+# generator.train()
 classifier.apply(weights_init_normal)
 
 data_transform = transforms.Compose([
@@ -167,6 +167,7 @@ for epoch in range(opt.n_epochs):
 
         foreground_mask[m_foreground] = 1
         foreground_mask[m_background] = 0
+        synthetic_images[m_background] = 0
 
         onehot_syn = one_hot_embedding(synthetic_labels, opt.n_classes).cuda()
         onehot_real = one_hot_embedding(real_labels, opt.n_classes).cuda()
@@ -193,7 +194,7 @@ for epoch in range(opt.n_epochs):
         optimizer_target.step()
 
         optimizer_target_fake.zero_grad()
-        target_fake_images = torch.cat((fake_images[0:int(opt.batch_size/2)-1],
+        target_fake_images = torch.cat((fake_images[0:int(opt.batch_size/2)-1].detach(),
                                        real_images[int(opt.batch_size/2):opt.batch_size-1]))
         target_label_pred = resnet_target_fake_classifier(target_fake_images)
         target_fake_label = torch.cat((synthetic_labels[0:int(opt.batch_size/2)-1],

@@ -38,8 +38,7 @@ l1_loss = torch.nn.L1Loss()
 # Loss weights
 lambda_adv = 1
 lambda_task = 0.2
-lambda_content_sim = 0.00008
-lambda_adv_consistency = 0.1
+lambda_content_sim = 0.008
 
 # Networks initialization
 generator = Generator(opt)
@@ -75,7 +74,7 @@ FloatTensor = torch.cuda.FloatTensor
 LongTensor = torch.cuda.LongTensor
 
 # Visualization - TensorboardX ##############################################################################
-writer = SummaryWriter(comment="_adv_feature")
+writer = SummaryWriter(comment="_pcb_only")
 
 writer.add_graph(generator,
                  (torch.randn(opt.batch_size, 3, opt.img_size, opt.img_size).cuda(),
@@ -200,20 +199,14 @@ for epoch in range(opt.n_epochs):
         disc = discriminator(fake_images, onehot_syn, synthetic_depth_imgs, disc_rand_noise)
         adversarial_part_loss = -torch.mean(disc)
 
-        fake_image_features = feature_extractor(fake_images)
-        real_image_features = feature_extractor(real_images)
-
-        feature_consistency_loss = adversarial_loss(feature_discriminator(fake_image_features), valid_features)
-
-        if epoch <= 1000:
-            lambda_adv_consistency = 0
-        else:
-            lambda_adv_consistency = 0.1
+        # fake_image_features = feature_extractor(fake_images)
+        # real_image_features = feature_extractor(real_images)
+        #
+        # feature_consistency_loss = adversarial_loss(feature_discriminator(fake_image_features), valid_features)
 
         generator_loss = lambda_task*task_specific_loss + \
                          lambda_adv*adversarial_part_loss + \
-                         lambda_content_sim*content_sim_loss + \
-                         lambda_adv_consistency * feature_consistency_loss
+                         lambda_content_sim*content_sim_loss
 
         generator_loss.backward()
         optimizer_G.step()
@@ -242,20 +235,21 @@ for epoch in range(opt.n_epochs):
 
             disc_real = discriminator(imgs_perm, perm_hot, synthetic_depth_imgs, disc_rand_noise)
             disc_fake = discriminator(fake_perm.detach(), fake_hot, synthetic_depth_imgs, disc_rand_noise)
-            gradient_penalty = compute_gradient_penalty(discriminator, real_images.data, fake_images.data)
-            discriminator_loss = -(torch.mean(disc_real) - torch.mean(disc_fake)) + 10 * gradient_penalty
+            discriminator_loss = -(torch.mean(disc_real) - torch.mean(disc_fake))
             discriminator_loss.backward()
             optimizer_D.step()
 
+            for p in discriminator.parameters():
+                p.data.clamp_(-0.011, 0.011)
         ##########################################################################################
 
         # Feature Discriminator ##################################################################
-        optimizer_FD.zero_grad()
-        feature_discriminator_loss = adversarial_loss(feature_discriminator(real_image_features), valid_features) + \
-                                     adversarial_loss(feature_discriminator(fake_image_features.detach()), fake_features)
-
-        feature_discriminator_loss.backward()
-        optimizer_FD.step()
+        # optimizer_FD.zero_grad()
+        # feature_discriminator_loss = adversarial_loss(feature_discriminator(real_image_features), valid_features) + \
+        #                              adversarial_loss(feature_discriminator(fake_image_features.detach()), fake_features)
+        #
+        # feature_discriminator_loss.backward()
+        # optimizer_FD.step()
         ##########################################################################################
 
         # Evaluation metrics #####################################################################
@@ -263,13 +257,12 @@ for epoch in range(opt.n_epochs):
         acc_real = np.mean(np.argmax(classifier(real_images).data.cpu().numpy(), axis=1) == real_labels.data.cpu().numpy())
         eval_real = np.mean(np.argmax(resnet_classifier(real_images).data.cpu().numpy(), axis=1) == real_labels.data.cpu().numpy())
 
-        print("[Epoch %d/%d] [Batch %d/%d] [D loss: %f] [G loss: %f] [FC loss: %f] "
+        print("[Epoch %d/%d] [Batch %d/%d] [D loss: %f] [G loss: %f]"
               "[Synthetic acc: %3d%%, Real acc: %3d%%, Eval Real acc: %3d%%] [Time taken: %f Secs]" %
               (epoch, opt.n_epochs,
                i+1, len(ori_loader),
                discriminator_loss.item(),
                generator_loss.item(),
-               feature_consistency_loss.item(),
                100*acc_synthetic,
                100*acc_real,
                100 * eval_real,
@@ -285,8 +278,8 @@ for epoch in range(opt.n_epochs):
         writer.add_scalar('Loss G', generator_loss.item(), batches_done)
 
         if batches_done % opt.sample_interval == 0:
+            torch.save(generator.state_dict(), 'models_ckpt/pcb_only.pt')
             sample = torch.cat((synthetic_images, fake_images, real_images))
             sample = make_grid(sample, normalize=True)
             writer.add_image("Images", sample, batches_done)
-            torch.save(generator.state_dict(), 'models_ckpt/adv_feature.pt')
-            save_image(sample, 'images/%d.png' % batches_done, normalize=True)
+            # save_image(sample, 'images/%d.png' % batches_done, normalize=True)
