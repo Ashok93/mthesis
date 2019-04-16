@@ -12,3 +12,9 @@
 2. Study synthetic to real transfer techniques.
 3. Study pixel-level domain adaption and test them on custom sets.
 4. Study larger domain shifts during adaptation and derive key inferences and solutions.
+
+### Dependancies:
+1. pytorch
+2. torchvision
+3. tensorboardX 
+4. numpy
