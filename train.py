@@ -53,7 +53,7 @@ for param in resnet_classifier.parameters():
 resnet_classifier.fc = nn.Linear(num_ftrs, opt.n_classes)
 
 feature_extractor = models.resnet18_feature_extractor(pretrained=True)
-feature_discriminator = FeatureDiscriminator()
+feature_discriminator = FeatureDiscriminator(opt)
 
 generator.cuda()
 discriminator.cuda()
@@ -74,7 +74,7 @@ FloatTensor = torch.cuda.FloatTensor
 LongTensor = torch.cuda.LongTensor
 
 # Visualization - TensorboardX ##############################################################################
-writer = SummaryWriter(comment="_pcb_only")
+writer = SummaryWriter(comment="_3_pcbs_hard")
 
 writer.add_graph(generator,
                  (torch.randn(opt.batch_size, 3, opt.img_size, opt.img_size).cuda(),
@@ -108,8 +108,8 @@ depth_image_folder = datasets.ImageFolder(root='dataset/synthetic/depth',
                                           ]))
 syn_dataset = ConcatDataset(syn_image_folder, depth_image_folder)
 
-ori_dataset = datasets.ImageFolder(root='dataset/real', transform=data_transform)
-test_dataset = datasets.ImageFolder(root='dataset/test', transform=data_transform)
+ori_dataset = datasets.ImageFolder(root='dataset/test', transform=data_transform)
+test_dataset = datasets.ImageFolder(root='dataset/test_2', transform=data_transform)
 
 syn_loader = torch.utils.data.DataLoader(syn_dataset,
                                          batch_size=opt.batch_size,
@@ -136,7 +136,7 @@ optimizer_G = torch.optim.Adam(itertools.chain(generator.parameters(),
                                lr=opt.lr, betas=(opt.b1, opt.b2))
 # scheduler_g = torch.optim.lr_scheduler.ExponentialLR(optimizer_G, 0.96, last_epoch=-1)
 optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
-optimizer_FD = torch.optim.Adam(feature_discriminator.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
+optimizer_FD = torch.optim.Adam(feature_discriminator.parameters(), lr=0.0002, betas=(opt.b1, opt.b2))
 optimizer_C = torch.optim.Adam(resnet_classifier.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
 ################################################################################################################
 
@@ -199,14 +199,15 @@ for epoch in range(opt.n_epochs):
         disc = discriminator(fake_images, onehot_syn, synthetic_depth_imgs, disc_rand_noise)
         adversarial_part_loss = -torch.mean(disc)
 
-        # fake_image_features = feature_extractor(fake_images)
-        # real_image_features = feature_extractor(real_images)
-        #
-        # feature_consistency_loss = adversarial_loss(feature_discriminator(fake_image_features), valid_features)
+        if epoch % 5 == 0:
+            feature_consistency_loss = adversarial_loss(feature_discriminator(fake_images, onehot_syn, disc_rand_noise), valid_features)
+        else:
+            feature_consistency_loss = 0
 
         generator_loss = lambda_task*task_specific_loss + \
                          lambda_adv*adversarial_part_loss + \
-                         lambda_content_sim*content_sim_loss
+                         lambda_content_sim*content_sim_loss + \
+                         0.01 * feature_consistency_loss
 
         generator_loss.backward()
         optimizer_G.step()
@@ -244,25 +245,27 @@ for epoch in range(opt.n_epochs):
         ##########################################################################################
 
         # Feature Discriminator ##################################################################
-        # optimizer_FD.zero_grad()
-        # feature_discriminator_loss = adversarial_loss(feature_discriminator(real_image_features), valid_features) + \
-        #                              adversarial_loss(feature_discriminator(fake_image_features.detach()), fake_features)
-        #
-        # feature_discriminator_loss.backward()
-        # optimizer_FD.step()
+        if epoch % 5 == 0:
+            optimizer_FD.zero_grad()
+            feature_discriminator_loss = adversarial_loss(feature_discriminator(real_images, onehot_real, disc_rand_noise), valid_features) + \
+                                         adversarial_loss(feature_discriminator(fake_images.detach(), onehot_syn, disc_rand_noise), fake_features)
+
+            feature_discriminator_loss.backward()
+            optimizer_FD.step()
         ##########################################################################################
 
         # Evaluation metrics #####################################################################
         acc_synthetic = np.mean(np.argmax(label_pred.data.cpu().numpy(), axis=1) == synthetic_labels.data.cpu().numpy())
-        acc_real = np.mean(np.argmax(classifier(real_images).data.cpu().numpy(), axis=1) == real_labels.data.cpu().numpy())
-        eval_real = np.mean(np.argmax(resnet_classifier(real_images).data.cpu().numpy(), axis=1) == real_labels.data.cpu().numpy())
+        acc_real = np.mean(np.argmax(resnet_classifier(real_images).data.cpu().numpy(), axis=1) == real_labels.data.cpu().numpy())
+        eval_real = np.mean(np.argmax(resnet_classifier(test_images).data.cpu().numpy(), axis=1) == test_labels.data.cpu().numpy())
 
-        print("[Epoch %d/%d] [Batch %d/%d] [D loss: %f] [G loss: %f]"
+        print("[Epoch %d/%d] [Batch %d/%d] [D loss: %f] [G loss: %f] [FC loss: %f]"
               "[Synthetic acc: %3d%%, Real acc: %3d%%, Eval Real acc: %3d%%] [Time taken: %f Secs]" %
               (epoch, opt.n_epochs,
                i+1, len(ori_loader),
                discriminator_loss.item(),
                generator_loss.item(),
+               0,
                100*acc_synthetic,
                100*acc_real,
                100 * eval_real,
@@ -278,7 +281,7 @@ for epoch in range(opt.n_epochs):
         writer.add_scalar('Loss G', generator_loss.item(), batches_done)
 
         if batches_done % opt.sample_interval == 0:
-            torch.save(generator.state_dict(), 'models_ckpt/pcb_only.pt')
+            torch.save(generator.state_dict(), 'models_ckpt/3_pcbs_hard.pt')
             sample = torch.cat((synthetic_images, fake_images, real_images))
             sample = make_grid(sample, normalize=True)
             writer.add_image("Images", sample, batches_done)

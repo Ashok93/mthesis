@@ -18,7 +18,7 @@ from utils.util_funcs import one_hot_embedding, weights_init_normal
 from utils.argparser import arg_parser
 from utils.datasets import ConcatDataset
 
-writer = SummaryWriter(comment="_evaluation_run_pcbs")
+writer = SummaryWriter(comment="_evaluation_pcb_only")
 
 # Get thar args from the user
 opt = arg_parser()
@@ -103,10 +103,10 @@ depth_image_folder = datasets.ImageFolder(root='dataset/synthetic/depth',
                                              transforms.ToTensor()
                                          ]))
 syn_dataset = ConcatDataset(syn_image_folder, depth_image_folder)
-ori_dataset = datasets.ImageFolder(root='dataset/real',
+ori_dataset = datasets.ImageFolder(root='dataset/test',
                                    transform=data_transform)
 
-test_dataset = datasets.ImageFolder(root='dataset/test',
+test_dataset = datasets.ImageFolder(root='dataset/test_2',
                                    transform=data_transform)
 
 # DataLoader for the datasets
@@ -216,14 +216,14 @@ for epoch in range(opt.n_epochs):
         ##########################################################################################
 
         # Evaluation metrics #####################################################################
-        train_pred = resnet_classifier(real_images)
-        source_pred = resnet_source_classifier(real_images)
-        target_pred = resnet_target_classifier(real_images)
-        target_fake_pred = resnet_target_fake_classifier(real_images)
-        target_source_pred = resnet_target_source_classifier(real_images)
+        train_pred = resnet_classifier(test_images)
+        source_pred = resnet_source_classifier(test_images)
+        target_pred = resnet_target_classifier(test_images)
+        target_fake_pred = resnet_target_fake_classifier(test_images)
+        target_source_pred = resnet_target_source_classifier(test_images)
 
         train_pred = np.argmax(train_pred.data.cpu().numpy(), axis=1)
-        train_label = real_labels.data.cpu().numpy()
+        train_label = test_labels.data.cpu().numpy()
         source_pred = np.argmax(source_pred.data.cpu().numpy(), axis=1)
         target_pred = np.argmax(target_pred.data.cpu().numpy(), axis=1)
         target_fake_pred = np.argmax(target_fake_pred.data.cpu().numpy(), axis=1)
