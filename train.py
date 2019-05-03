@@ -5,17 +5,17 @@ import torch
 import torch.nn as nn
 from torch.autograd import Variable
 import torch.utils.data
+from torch.utils.tensorboard import SummaryWriter
 import torchvision.transforms as transforms
 from torchvision import datasets, models
 from torchvision.utils import make_grid, save_image
-from tensorboardX import SummaryWriter
 
 from nets.generator import Generator
 from nets.discriminator import Discriminator
 from nets.classifier import Classifier
 from nets.embedding_discriminator import FeatureDiscriminator
 
-from utils.util_funcs import one_hot_embedding, weights_init_normal, compute_gradient_penalty
+from utils.util_funcs import one_hot_embedding, weights_init_normal
 from utils.argparser import arg_parser
 from utils.datasets import ConcatDataset
 
@@ -52,7 +52,6 @@ for param in resnet_classifier.parameters():
     param.requires_grad = False
 resnet_classifier.fc = nn.Linear(num_ftrs, opt.n_classes)
 
-feature_extractor = models.resnet18_feature_extractor(pretrained=True)
 feature_discriminator = FeatureDiscriminator(opt)
 
 generator.cuda()
@@ -60,7 +59,6 @@ discriminator.cuda()
 classifier.cuda()
 adversarial_loss.cuda()
 task_loss.cuda()
-feature_extractor.cuda()
 resnet_classifier.cuda()
 feature_discriminator.cuda()
 
@@ -70,11 +68,8 @@ discriminator.apply(weights_init_normal)
 classifier.apply(weights_init_normal)
 feature_discriminator.apply(weights_init_normal)
 
-FloatTensor = torch.cuda.FloatTensor
-LongTensor = torch.cuda.LongTensor
-
 # Visualization - TensorboardX ##############################################################################
-writer = SummaryWriter(comment="_3_pcbs_hard")
+writer = SummaryWriter(comment="_3_pcbs")
 
 writer.add_graph(generator,
                  (torch.randn(opt.batch_size, 3, opt.img_size, opt.img_size).cuda(),
@@ -108,8 +103,8 @@ depth_image_folder = datasets.ImageFolder(root='dataset/synthetic/depth',
                                           ]))
 syn_dataset = ConcatDataset(syn_image_folder, depth_image_folder)
 
-ori_dataset = datasets.ImageFolder(root='dataset/test', transform=data_transform)
-test_dataset = datasets.ImageFolder(root='dataset/test_2', transform=data_transform)
+ori_dataset = datasets.ImageFolder(root='dataset/real', transform=data_transform)
+test_dataset = datasets.ImageFolder(root='dataset/real', transform=data_transform)
 
 syn_loader = torch.utils.data.DataLoader(syn_dataset,
                                          batch_size=opt.batch_size,
@@ -134,7 +129,6 @@ test_loader = torch.utils.data.DataLoader(test_dataset,
 optimizer_G = torch.optim.Adam(itertools.chain(generator.parameters(),
                                                classifier.parameters()),
                                lr=opt.lr, betas=(opt.b1, opt.b2))
-# scheduler_g = torch.optim.lr_scheduler.ExponentialLR(optimizer_G, 0.96, last_epoch=-1)
 optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
 optimizer_FD = torch.optim.Adam(feature_discriminator.parameters(), lr=0.0002, betas=(opt.b1, opt.b2))
 optimizer_C = torch.optim.Adam(resnet_classifier.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
@@ -145,30 +139,32 @@ for epoch in range(opt.n_epochs):
         batches_done = len(syn_loader) * epoch + i
         start_time = time.time()
 
-        sythetic_images, synthetic_labels = synth_images
+        synthetic_images, synthetic_labels = synth_images
         synthetic_depth_imgs, synthetic_depth_labels = synth_depth_images
         test_images, test_labels = next(iter(test_loader))
 
-        batch_size = sythetic_images.size(0)
-        valid = Variable(FloatTensor(batch_size, *patch).fill_(1.0), requires_grad=False)
-        fake = Variable(FloatTensor(batch_size, *patch).fill_(0.0), requires_grad=False)
-        valid_features = Variable(FloatTensor(batch_size, 1).fill_(1.0), requires_grad=False)
-        fake_features = Variable(FloatTensor(batch_size, 1).fill_(0.0), requires_grad=False)
-
-        # Configure input
-        synthetic_images = Variable(sythetic_images.type(FloatTensor))
-        synthetic_labels = Variable(synthetic_labels.type(LongTensor))
-        real_images = Variable(real_images.type(FloatTensor))
-        synthetic_depth_imgs = Variable(synthetic_depth_imgs.type(FloatTensor))
-        real_labels = Variable(real_labels.type(LongTensor))
-        test_images = Variable(test_images.type(FloatTensor))
-        test_labels = Variable(test_labels.type(LongTensor))
+        valid = torch.ones(opt.batch_size, *patch)
+        fake = torch.zeros(opt.batch_size, *patch)
+        valid_features = torch.zeros(opt.batch_size, 1)
+        fake_features = torch.zeros(opt.batch_size, 1)
 
         # Sort the images by labels for viz purposes
         argsorted = torch.argsort(synthetic_labels)
         synthetic_images = synthetic_images[argsorted]
         synthetic_labels = synthetic_labels[argsorted]
         synthetic_depth_imgs = synthetic_depth_imgs[argsorted]
+
+        synthetic_images = synthetic_images.cuda()
+        synthetic_labels = synthetic_labels.cuda()
+        real_images = real_images.cuda()
+        synthetic_depth_imgs = synthetic_depth_imgs.cuda()
+        real_labels = real_labels.cuda()
+        test_images = test_images.cuda()
+        test_labels = test_labels.cuda()
+        valid = valid.cuda()
+        valid_features = valid_features.cuda()
+        fake = fake.cuda()
+        fake_features = fake_features.cuda()
 
         foreground_mask = synthetic_depth_imgs.clone()
         m_foreground = foreground_mask <= 0
@@ -182,7 +178,8 @@ for epoch in range(opt.n_epochs):
 
         # Generator and task training ############################################################
         optimizer_G.zero_grad()
-        z = Variable(FloatTensor(np.random.uniform(-1, 1, (batch_size, opt.latent_dim))))
+        z = torch.FloatTensor(opt.batch_size, opt.latent_dim).uniform_(-1, 1).cuda()
+        # z = Variable(FloatTensor(np.random.uniform(-1, 1, (opt.batch_size, opt.latent_dim))))
         # z = torch.Tensor(batch_size, opt.latent_dim).normal_(0, 2).cuda()
         std = torch.max(torch.FloatTensor([1]) - pow(epoch, 2)/opt.n_epochs, torch.FloatTensor([0]))
         disc_rand_noise = torch.randn(*synthetic_images.shape).cuda() * std.cuda()
@@ -281,7 +278,7 @@ for epoch in range(opt.n_epochs):
         writer.add_scalar('Loss G', generator_loss.item(), batches_done)
 
         if batches_done % opt.sample_interval == 0:
-            torch.save(generator.state_dict(), 'models_ckpt/3_pcbs_hard.pt')
+            torch.save(generator.state_dict(), 'models_ckpt/3_pcbs.pt')
             sample = torch.cat((synthetic_images, fake_images, real_images))
             sample = make_grid(sample, normalize=True)
             writer.add_image("Images", sample, batches_done)

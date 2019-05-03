@@ -1,0 +1,7 @@
+venv
+.idea/
+dataset
+models_ckpt
+runs
+*.pyc
+*__pycache__
