@@ -25,7 +25,6 @@ class Discriminator(nn.Module):
         )
 
     def forward(self, img, onehot, depth_img, disc_rand_noise):
-        # noisy_img = torch.add(img, disc_rand_noise)
         dis_input = torch.cat((img, self.one_hot_fc(onehot).view(*img.shape)), 1)
         model_op = self.model(dis_input)
         return model_op

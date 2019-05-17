@@ -19,7 +19,7 @@ def save_images_from_video(video_path, save_dir, i=0):
     cap.release()
 
 
-def resize_images_in_folder(folder_path, size=(200.200)):
+def resize_images_in_folder(folder_path, size=(200, 200)):
     filenames = glob.glob(folder_path + "/*.png")
     filenames.sort()
 
@@ -27,3 +27,7 @@ def resize_images_in_folder(folder_path, size=(200.200)):
         resized_image = cv2.resize(cv2.imread(img), size, interpolation=cv2.INTER_AREA)
         print(i)
         cv2.imwrite(folder_path + '/' + str(i) + '.png', resized_image)
+
+
+if __name__ == "__main__":
+    save_images_from_video('video_path', 'save_dir/path', i=0)

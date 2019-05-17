@@ -2,10 +2,10 @@ import torch
 import torch.nn as nn
 
 
-class FeatureDiscriminator(nn.Module):
+class GANDiscriminator(nn.Module):
 
     def __init__(self, opt):
-        super(FeatureDiscriminator, self).__init__()
+        super(GANDiscriminator, self).__init__()
         self.one_hot_fc = nn.Linear(opt.n_classes, opt.channels * opt.img_size ** 2)
 
         ndf = 64
