@@ -45,3 +45,21 @@ class Generator(nn.Module):
         gen_input = torch.cat((gen_input, self.one_hot_fc(onehot_syn).view(*img.shape)), 1)
         gen_image = self.model(gen_input)
         return gen_image
+
+
+class SegmentationMapGenerator(Generator):
+
+    def __init__(self, opt):
+        super(SegmentationMapGenerator, self).__init__(opt)
+        self.l1 = nn.Sequential(nn.Conv2d(opt.channels, 64, 3, 1, 1), nn.ReLU(inplace=True))
+        self.l2 = nn.Sequential(nn.Conv2d(64, opt.channels, 3, 1, 1), nn.Sigmoid())
+
+        self.model = nn.Sequential(
+            self.l1,
+            self.res_blocks,
+            self.l2
+        )
+
+    def forward(self, img):
+        gen_image = self.model(img)
+        return gen_image

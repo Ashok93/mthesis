@@ -11,14 +11,14 @@ from torchvision import datasets, models
 from torchvision.utils import save_image, make_grid
 from torch.utils.tensorboard import SummaryWriter
 
-from nets.generator import Generator
+from nets.generator import Generator, SegmentationMapGenerator
 from nets.classifier import Classifier
 
 from utils.util_funcs import one_hot_embedding, weights_init_normal
 from utils.argparser import arg_parser
 from utils.datasets import ConcatDataset
 
-writer = SummaryWriter(comment="_evaluation_3_pcb_hard_fc")
+writer = SummaryWriter(comment="_evaluation_3_PCB_hard_only_wgan")
 
 # Get thar args from the user
 opt = arg_parser()
@@ -31,6 +31,7 @@ cuda = True if torch.cuda.is_available() else False
 
 # Loss function
 task_loss = torch.nn.CrossEntropyLoss()
+l1_loss = torch.nn.L1Loss()
 
 # Loss weights
 lambda_adv = 1
@@ -77,17 +78,21 @@ resnet_source_classifier = resnet_source_classifier.cuda()
 resnet_target_classifier = resnet_target_classifier.cuda()
 resnet_target_source_classifier = resnet_target_source_classifier.cuda()
 resnet_target_fake_classifier = resnet_target_fake_classifier.cuda()
+seg_map_generator = SegmentationMapGenerator(opt)
 ########################################################################################################################
 
 if cuda:
     generator.cuda()
     classifier.cuda()
     task_loss.cuda()
+    l1_loss.cuda()
+    seg_map_generator.cuda()
 
 # Initialize weights
-generator.load_state_dict(torch.load('models_ckpt/3_PCB_hard_fc.pt'))
+generator.load_state_dict(torch.load('models_ckpt/3_PCB_hard_only_wgan.pt'))
 # generator.train()
 classifier.apply(weights_init_normal)
+seg_map_generator.apply(weights_init_normal)
 
 data_transform = transforms.Compose([
         transforms.Resize((opt.img_size, opt.img_size)),
@@ -95,9 +100,9 @@ data_transform = transforms.Compose([
         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
     ])
 
-syn_image_folder = datasets.ImageFolder(root='dataset/synthetic/rgb',
+syn_image_folder = datasets.ImageFolder(root='dataset/synthetic_new/rgb',
                                         transform=data_transform)
-depth_image_folder = datasets.ImageFolder(root='dataset/synthetic/depth',
+depth_image_folder = datasets.ImageFolder(root='dataset/synthetic_new/depth',
                                           transform=transforms.Compose([
                                              transforms.Resize((opt.img_size, opt.img_size)),
                                              transforms.ToTensor()
@@ -105,8 +110,9 @@ depth_image_folder = datasets.ImageFolder(root='dataset/synthetic/depth',
 syn_dataset = ConcatDataset(syn_image_folder, depth_image_folder)
 ori_dataset = datasets.ImageFolder(root='dataset/test',
                                    transform=data_transform)
+background_dataset = datasets.ImageFolder(root='dataset/backgrounds', transform=data_transform)
 
-test_dataset = datasets.ImageFolder(root='dataset/test_2',
+test_dataset = datasets.ImageFolder(root='dataset/bkkpp',
                                     transform=data_transform)
 
 # DataLoader for the datasets
@@ -128,6 +134,12 @@ test_loader = torch.utils.data.DataLoader(test_dataset,
                                           num_workers=2,
                                           drop_last=True)
 
+background_loader = torch.utils.data.DataLoader(background_dataset,
+                                                batch_size=opt.batch_size,
+                                                shuffle=True,
+                                                num_workers=2,
+                                                drop_last=True)
+
 
 # Optimizers
 optimizer_C = torch.optim.Adam(classifier.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
@@ -136,6 +148,8 @@ optimizer_source = torch.optim.Adam(resnet_source_classifier.parameters(), lr=op
 optimizer_target = torch.optim.Adam(resnet_target_classifier.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
 optimizer_target_fake = torch.optim.Adam(resnet_target_fake_classifier.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
 optimizer_target_source = torch.optim.Adam(resnet_target_source_classifier.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
+optimizer_SF = torch.optim.Adam(seg_map_generator.parameters(), lr=0.0002, betas=(opt.b1, opt.b2))
+# optimizer_SB = torch.optim.Adam(seg_map_generator2.parameters(), lr=0.0002, betas=(opt.b1, opt.b2))
 
 confusion_matrix = torch.zeros(opt.n_classes, opt.n_classes)
 
@@ -165,8 +179,9 @@ for epoch in range(opt.n_epochs):
         fake = fake.cuda()
 
         foreground_mask = synthetic_depth_imgs.clone()
-        m_foreground = foreground_mask <= 0
-        m_background = foreground_mask >= 1
+        backgroud_mask = synthetic_depth_imgs.clone()
+        m_foreground = foreground_mask <= 0.5
+        m_background = foreground_mask >= 0.6
         foreground_mask[m_foreground] = 1
         foreground_mask[m_background] = 0
         synthetic_images[m_background] = 0
@@ -217,6 +232,14 @@ for epoch in range(opt.n_epochs):
 
         ##########################################################################################
 
+        # Segmentation Generator using fake ######################################################
+        optimizer_SF.zero_grad()
+        fake_seg_map = seg_map_generator(fake_images.detach())
+        seg_loss = l1_loss(fake_seg_map, synthetic_depth_imgs)
+        seg_loss.backward()
+        optimizer_SF.step()
+        ##########################################################################################
+
         # Evaluation metrics #####################################################################
         train_pred = resnet_classifier(test_images)
         source_pred = resnet_source_classifier(test_images)
@@ -225,18 +248,18 @@ for epoch in range(opt.n_epochs):
         target_source_pred = resnet_target_source_classifier(test_images)
 
         train_pred = np.argmax(train_pred.data.cpu().numpy(), axis=1)
-        train_label = test_labels.data.cpu().numpy()
+        test_label = test_labels.data.cpu().numpy()
         source_pred = np.argmax(source_pred.data.cpu().numpy(), axis=1)
         target_pred = np.argmax(target_pred.data.cpu().numpy(), axis=1)
         target_fake_pred = np.argmax(target_fake_pred.data.cpu().numpy(), axis=1)
         target_source_pred = np.argmax(target_source_pred.data.cpu().numpy(), axis=1)
 
-        acc_synthetic = np.mean(train_pred == train_label)
-        acc_source = np.mean(source_pred == train_label)
-        acc_target = np.mean(target_pred == train_label)
-        acc_target_fake = np.mean(target_fake_pred == train_label)
-        acc_target_source = np.mean(target_source_pred == train_label)
-        confusion_matrix[train_pred, train_label] += 1
+        acc_synthetic = np.mean(train_pred == test_label)
+        acc_source = np.mean(source_pred == test_label)
+        acc_target = np.mean(target_pred == test_label)
+        acc_target_fake = np.mean(target_fake_pred == test_label)
+        acc_target_source = np.mean(target_source_pred == test_label)
+        confusion_matrix[train_pred, test_label] += 1
 
         print("[Epoch %d/%d] [Batch %d/%d] [C loss: %f] [Fake acc: %3d%%] [Source Only acc: %3d%%]"
               " [Target Only acc: %3d%%] [Fake + Target Only acc: %3d%%] [Fake + Source Only acc: %3d%%]"
@@ -260,8 +283,14 @@ for epoch in range(opt.n_epochs):
         # print(confusion_matrix)
 
         batches_done = len(syn_loader) * epoch + i
-        if batches_done % opt.sample_interval == 0:
-            sample = torch.cat((synthetic_images, fake_images, real_images))
+
+        if batches_done % 100 == 0:
+            test_seg_map = seg_map_generator(test_images)
+            seg_back = test_seg_map >= 0.7
+            seg_front = test_seg_map < 0.7
+            test_seg_map[seg_back] = 0
+            test_seg_map[seg_front] = 1
+            sample = torch.cat((synthetic_images, fake_images, test_images, torch.mul(test_seg_map, test_images)))
             sample = make_grid(sample, normalize=True)
             writer.add_image("Images", sample, batches_done)
             save_image(sample, 'images/%d.png' % batches_done, nrow=int(math.sqrt(batch_size)), normalize=True)
