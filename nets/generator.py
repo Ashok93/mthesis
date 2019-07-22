@@ -43,8 +43,8 @@ class Generator(nn.Module):
         img_plus_depth = torch.cat((img, depth_img.expand(*img.shape)), 1)
         gen_input = torch.cat((img_plus_depth, self.fc(z).view(*img.shape)), 1)
         gen_input = torch.cat((gen_input, self.one_hot_fc(onehot_syn).view(*img.shape)), 1)
-        gen_image = self.model(gen_input)
-        return gen_image
+        gen_images = self.model(gen_input)
+        return gen_images
 
 
 class SegmentationMapGenerator(Generator):

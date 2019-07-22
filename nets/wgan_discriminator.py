@@ -24,7 +24,7 @@ class Discriminator(nn.Module):
             nn.Conv2d(512, 1, 3, 1, 1)
         )
 
-    def forward(self, img, onehot, depth_img, disc_rand_noise):
+    def forward(self, img, onehot, depth_img):
         dis_input = torch.cat((img, self.one_hot_fc(onehot).view(*img.shape)), 1)
         model_op = self.model(dis_input)
         return model_op

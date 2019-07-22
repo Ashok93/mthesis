@@ -6,7 +6,7 @@ import torch.utils.data
 from torch.utils.tensorboard import SummaryWriter
 import torchvision.transforms as transforms
 from torchvision import datasets, models
-from torchvision.utils import make_grid, save_image
+from torchvision.utils import make_grid
 
 from nets.generator import Generator
 from nets.wgan_discriminator import Discriminator
@@ -36,8 +36,9 @@ l1_loss = torch.nn.L1Loss()
 
 # Loss weights
 lambda_adv = 1
-lambda_task = 0.33
-lambda_content_sim = 0.008
+lambda_task = 0.1
+lambda_content_sim = 0.0003
+lambda_feature_consistency = 0.0003
 
 # Networks initialization
 generator = Generator(opt)
@@ -46,10 +47,8 @@ classifier = Classifier(opt)
 gan_discriminator = GANDiscriminator(opt)
 
 # Pretrained nets from Pytorch models
-resnet_classifier = models.resnet18(pretrained=True)
+resnet_classifier = models.resnet18()
 num_ftrs = resnet_classifier.fc.in_features
-for param in resnet_classifier.parameters():
-    param.requires_grad = False
 resnet_classifier.fc = nn.Linear(num_ftrs, opt.n_classes)
 
 resnet_feature_extractor = resnet18_feature_extractor(pretrained=True)
@@ -68,9 +67,10 @@ generator.apply(weights_init_normal)
 discriminator.apply(weights_init_normal)
 classifier.apply(weights_init_normal)
 gan_discriminator.apply(weights_init_normal)
+resnet_classifier.apply(weights_init_normal)
 
 # Visualization - TensorboardX ##############################################################################
-writer = SummaryWriter(comment="_3_PCB_hard_with_rc_extra")
+writer = SummaryWriter(comment="_training_phase")
 
 writer.add_graph(generator,
                  (torch.randn(opt.batch_size, 3, opt.img_size, opt.img_size).cuda(),
@@ -106,9 +106,9 @@ ori_dataset = datasets.ImageFolder(root='dataset/test', transform=data_transform
 
 background_dataset = datasets.ImageFolder(root='dataset/backgrounds', transform=data_transform)
 
-syn_dataset = ConcatDataset(syn_image_folder, depth_image_folder)
+test_dataset = datasets.ImageFolder(root='dataset/test', transform=data_transform)
 
-test_dataset = datasets.ImageFolder(root='dataset/bkkpp', transform=data_transform)
+syn_dataset = ConcatDataset(syn_image_folder, depth_image_folder)
 
 syn_loader = torch.utils.data.DataLoader(syn_dataset,
                                          batch_size=opt.batch_size,
@@ -127,18 +127,10 @@ test_loader = torch.utils.data.DataLoader(test_dataset,
                                           shuffle=True,
                                           num_workers=2,
                                           drop_last=True)
-
-background_loader = torch.utils.data.DataLoader(background_dataset,
-                                                batch_size=opt.batch_size,
-                                                shuffle=True,
-                                                num_workers=2,
-                                                drop_last=True)
 ###############################################################################################################
 
 # Optimizers ##################################################################################################
-optimizer_G = torch.optim.Adam(itertools.chain(generator.parameters(),
-                                               classifier.parameters()
-                                               ),
+optimizer_G = torch.optim.Adam(itertools.chain(generator.parameters(), classifier.parameters()),
                                lr=opt.lr, betas=(opt.b1, opt.b2))
 optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
 optimizer_FD = torch.optim.Adam(gan_discriminator.parameters(), lr=0.0002, betas=(opt.b1, opt.b2))
@@ -184,8 +176,8 @@ for epoch in range(opt.n_epochs):
         fake_features = fake_features.cuda()
 
         foreground_mask = synthetic_depth_imgs.clone()
-        m_foreground = foreground_mask >= 0.5
-        m_background = foreground_mask >= 0.6
+        m_foreground = foreground_mask <= 0.4
+        m_background = foreground_mask > 0.4
         foreground_mask[m_foreground] = 1
         foreground_mask[m_background] = 0
         synthetic_images[m_background] = 0
@@ -222,15 +214,11 @@ for epoch in range(opt.n_epochs):
         real_ped = resnet_classifier(real_images)
         real_classifier_loss = task_loss(real_ped, real_labels)
 
-        # if epoch < 15:
-        #     gan_loss = adversarial_loss(gan_discriminator(fake_images, onehot_syn, disc_rand_noise), valid_features)
-        # else:
-        #     gan_loss = 0
-
         generator_loss = lambda_task * task_specific_loss + \
                          lambda_adv * wgan_generator_loss + \
                          lambda_content_sim * content_sim_loss + \
-                         real_classifier_loss
+                         real_classifier_loss + \
+                         feature_consistency_loss
 
         generator_loss.backward()
         optimizer_G.step()
@@ -251,11 +239,11 @@ for epoch in range(opt.n_epochs):
             optimizer_D.zero_grad()
 
             shuff = torch.randperm(real_images.size(0))
-            imgs_perm = real_images
-            perm_hot = onehot_real
-            fake_perm = fake_images
-            fake_hot = onehot_syn
-            synthetic_depth_imgs = synthetic_depth_imgs
+            imgs_perm = real_images[shuff]
+            perm_hot = onehot_real[shuff]
+            fake_perm = fake_images[shuff]
+            fake_hot = onehot_syn[shuff]
+            synthetic_depth_imgs = synthetic_depth_imgs[shuff]
 
             disc_real = discriminator(imgs_perm, perm_hot, synthetic_depth_imgs, disc_rand_noise)
             disc_fake = discriminator(fake_perm.detach(), fake_hot, synthetic_depth_imgs, disc_rand_noise)
@@ -267,29 +255,17 @@ for epoch in range(opt.n_epochs):
                 p.data.clamp_(-0.011, 0.011)
         ##########################################################################################
 
-        # GAN Discriminator ##################################################################
-        # if epoch < 15:
-        #     optimizer_FD.zero_grad()
-        #     gan_discriminator_loss = adversarial_loss(gan_discriminator(real_images, onehot_real, disc_rand_noise), valid_features) + \
-        #                              adversarial_loss(gan_discriminator(fake_images.detach(), onehot_syn, disc_rand_noise), fake_features)
-        #
-        #     gan_discriminator_loss.backward()
-        #     optimizer_FD.step()
-        ##########################################################################################
-
         # Evaluation metrics #####################################################################
         acc_synthetic = np.mean(np.argmax(label_pred.data.cpu().numpy(), axis=1) == synthetic_labels.data.cpu().numpy())
         acc_real = np.mean(np.argmax(resnet_classifier(real_images).data.cpu().numpy(), axis=1) == real_labels.data.cpu().numpy())
         eval_real = np.mean(np.argmax(resnet_classifier(test_images).data.cpu().numpy(), axis=1) == test_labels.data.cpu().numpy())
 
-        print("[Epoch %d/%d] [Batch %d/%d] [D loss: %f] [G loss: %f] [FC loss: %f] [GAN loss: %f]"
+        print("[Epoch %d/%d] [Batch %d/%d] [D loss: %f] [G loss: %f]"
               "[Synthetic acc: %3d%%, Real acc: %3d%%, Eval Real acc: %3d%%] [Time taken: %f Secs]" %
               (epoch, opt.n_epochs,
                i + 1, len(syn_loader),
                wgan_discriminator_loss.item(),
                generator_loss.item(),
-               feature_consistency_loss.item(),
-               0,
                100 * acc_synthetic,
                100 * acc_real,
                100 * eval_real,
@@ -301,13 +277,11 @@ for epoch in range(opt.n_epochs):
         writer.add_scalar('Loss Content Similarity', content_sim_loss.item(), batches_done)
         writer.add_scalar('Loss Adversarial', wgan_generator_loss.item(), batches_done)
         writer.add_scalar('Loss Task Network', task_specific_loss.item(), batches_done)
-        writer.add_scalar('Feature Consistency Loss', feature_consistency_loss.item(), batches_done)
         writer.add_scalar('Loss D', wgan_discriminator_loss.item(), batches_done)
         writer.add_scalar('Loss G', generator_loss.item(), batches_done)
 
         if batches_done % opt.sample_interval == 0:
-            torch.save(generator.state_dict(), 'models_ckpt/3_PCB_hard_with_rc_extra.pt')
+            torch.save(generator.state_dict(), 'models_ckpt/trained_model.pt')
             sample = torch.cat((synthetic_images, fake_images, real_images))
             sample = make_grid(sample, normalize=True)
             writer.add_image("Images", sample, batches_done)
-            # save_image(sample, 'images/%d.png' % batches_done, normalize=True)

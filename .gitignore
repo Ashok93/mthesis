@@ -3,5 +3,6 @@ venv
 dataset
 models_ckpt
 runs
+images
 *.pyc
 *__pycache__
